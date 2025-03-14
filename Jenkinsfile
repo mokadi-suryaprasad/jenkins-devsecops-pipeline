@@ -1,10 +1,19 @@
 @Library('jenkins-shared-library') _
 
-parallel(
-    GoPipeline: {
-        ciPipeline(language: 'go')
-    },
-    HTML: {
-        ciPipeline(language: 'html')
+pipeline {
+    agent any
+
+    stages {
+        stage('Build and Deploy Backend') {
+            steps {
+                ciPipeline(language: 'go')
+            }
+        }
+
+        stage('Deploy Frontend') {
+            steps {
+                ciPipeline(language: 'html')
+            }
+        }
     }
-)
+}

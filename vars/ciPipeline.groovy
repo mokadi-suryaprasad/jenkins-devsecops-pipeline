@@ -7,23 +7,36 @@ def call(Map config = [:]) {
             DOCKER_USERNAME = credentials('docker-username')
             DOCKER_PASSWORD = credentials('docker-password')
             SLACK_WEBHOOK = credentials('slack-webhook')
-            IMAGE_NAME = "${env.DOCKER_USERNAME}/${env.JOB_NAME}:${env.BUILD_NUMBER}"
+            IMAGE_NAME = "${env.DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
+            GIT_REPO = 'https://github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git' 
+            GIT_BRANCH = 'main'
         }
 
         stages {
-            stage('Checkout Code') {
+            stage('Clone GitHub Repository') {
                 steps {
-                    checkout scm
+                    script {
+                        echo "Cloning repository from GitHub"
+                        sh """
+                            rm -rf workspace
+                            git clone -b $GIT_BRANCH $GIT_REPO workspace
+                            cd workspace
+                            git config --global --add safe.directory $(pwd)
+                        """
+                    }
                 }
             }
 
             stage('Run Tests') {
                 steps {
                     script {
-                        if (config.language == 'go') {
-                            sh 'go test ./...'
-                        } else if (config.language == 'html') {
-                            echo 'Skipping tests for HTML as it is static'
+                        dir('workspace') {
+                            if (config.language == 'go') {
+                                echo "Running Go tests"
+                                sh 'go test ./...'
+                            } else {
+                                echo "Skipping tests for HTML as it is static"
+                            }
                         }
                     }
                 }
@@ -32,10 +45,10 @@ def call(Map config = [:]) {
             stage('SonarQube Analysis') {
                 steps {
                     script {
-                        if (config.language == 'go') {
-                            sh 'sonar-scanner -Dproject.settings=resources/sonar-project-go.properties'
-                        } else if (config.language == 'html') {
-                            sh 'sonar-scanner -Dproject.settings=resources/sonar-project-html.properties'
+                        dir('workspace') {
+                            def sonarFile = config.language == 'go' ? 'resources/sonar-project-go.properties' : 'resources/sonar-project-html.properties'
+                            echo "Running SonarQube Analysis"
+                            sh "sonar-scanner -Dproject.settings=${sonarFile}"
                         }
                     }
                 }
@@ -59,10 +72,13 @@ def call(Map config = [:]) {
             stage('Build Code') {
                 steps {
                     script {
-                        if (config.language == 'go') {
-                            sh 'go build -o app'
-                        } else if (config.language == 'html') {
-                            echo 'Skipping build step for HTML'
+                        dir('workspace') {
+                            if (config.language == 'go') {
+                                echo "Building Go application"
+                                sh 'go build -o app'
+                            } else {
+                                echo "Skipping build step for HTML"
+                            }
                         }
                     }
                 }
@@ -71,10 +87,11 @@ def call(Map config = [:]) {
             stage('Build Docker Image') {
                 steps {
                     script {
-                        sh """
+                        dir('workspace') {
+                            def dockerfilePath = config.language == 'go' ? 'backend/Dockerfile' : 'frontend/Dockerfile'
                             echo "Building Docker image: $IMAGE_NAME"
-                            docker build -t $IMAGE_NAME .
-                        """
+                            sh "docker build -t $IMAGE_NAME -f $dockerfilePath ."
+                        }
                     }
                 }
             }
@@ -83,17 +100,17 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         sh """
-                            echo "Checking for Trivy installation..."
+                            echo "Checking for Trivy installation"
                             if ! command -v trivy &> /dev/null; then
-                                echo "Installing Trivy..."
+                                echo "Installing Trivy"
                                 wget -qO- https://github.com/aquasecurity/trivy/releases/latest/download/trivy-linux-amd64.tar.gz | tar xz
                                 sudo mv trivy /usr/local/bin/
                             fi
 
-                            echo "Running Trivy vulnerability scan on $IMAGE_NAME..."
+                            echo "Running Trivy vulnerability scan on $IMAGE_NAME"
                             trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME || {
-                                echo "Trivy scan found vulnerabilities! Failing the build.";
-                                exit 1;
+                                echo "Trivy scan found vulnerabilities, failing the build"
+                                exit 1
                             }
                         """
                     }
@@ -104,7 +121,7 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         sh """
-                            echo "Logging into Docker Hub..."
+                            echo "Logging into Docker Hub"
                             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
                             echo "Pushing Docker image: $IMAGE_NAME"
                             docker push $IMAGE_NAME
@@ -116,30 +133,34 @@ def call(Map config = [:]) {
             stage('Update Kubernetes Deployment') {
                 steps {
                     script {
-                        sh """
-                            echo "Updating Kubernetes deployment.yaml with new image..."
-                            yq eval '.spec.template.spec.containers[0].image = \"$IMAGE_NAME\"' -i kubernetes/deployment.yaml
-                            
-                            git add kubernetes/deployment.yaml
-                            git commit -m "Updated deployment.yaml with $IMAGE_NAME"
-                            git push || echo "Warning: Git push failed. Please check permissions."
-                        """
+                        dir('workspace') {
+                            def deploymentFile = config.language == 'go' ? 'kubernetes/backend-deployment.yaml' : 'kubernetes/frontend-deployment.yaml'
+                            echo "Updating Kubernetes deployment.yaml with new image"
+                            sh """
+                                yq eval '.spec.template.spec.containers[0].image = \"$IMAGE_NAME\"' -i $deploymentFile
+                                
+                                git add $deploymentFile
+                                git commit -m "Updated deployment.yaml with $IMAGE_NAME"
+                                git push || echo "Warning: Git push failed. Please check permissions"
+                            """
+                        }
                     }
                 }
             }
+
         }
 
         post {
             success {
                 script {
-                    echo "Pipeline execution successful! Sending Slack notification..."
-                    slackSend(color: 'good', message: "✅ Pipeline executed successfully: ${env.BUILD_URL}")
+                    echo "Pipeline execution successful, sending Slack notification"
+                    slackSend(color: 'good', message: "${config.language} pipeline executed successfully: ${env.BUILD_URL}")
                 }
             }
             failure {
                 script {
-                    echo "Pipeline failed! Sending Slack notification..."
-                    slackSend(color: 'danger', message: "❌ Pipeline failed: ${env.BUILD_URL}")
+                    echo "Pipeline failed, sending Slack notification"
+                    slackSend(color: 'danger', message: "${config.language} pipeline failed: ${env.BUILD_URL}")
                 }
             }
         }
