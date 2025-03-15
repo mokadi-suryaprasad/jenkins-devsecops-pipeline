@@ -17,12 +17,12 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         echo "Cloning repository from GitHub"
-                        sh """
+                        sh '''
                             rm -rf workspace
                             git clone -b $GIT_BRANCH $GIT_REPO workspace
                             cd workspace
-                            git config --global --add safe.directory $(pwd)
-                        """
+                            git config --global --add safe.directory \$(pwd)
+                        '''
                     }
                 }
             }
@@ -61,7 +61,7 @@ def call(Map config = [:]) {
                             curl -s -X GET "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=my-project" \
                             -H "Authorization: Bearer $SONAR_TOKEN" | jq -r '.projectStatus.status'
                         ''', returnStdout: true).trim()
-                        
+
                         if (status != "OK") {
                             error "SonarQube Quality Gate Failed"
                         }
@@ -99,20 +99,10 @@ def call(Map config = [:]) {
             stage('Trivy Scan Docker Image') {
                 steps {
                     script {
-                        sh """
-                            echo "Checking for Trivy installation"
-                            if ! command -v trivy &> /dev/null; then
-                                echo "Installing Trivy"
-                                wget -qO- https://github.com/aquasecurity/trivy/releases/latest/download/trivy-linux-amd64.tar.gz | tar xz
-                                sudo mv trivy /usr/local/bin/
-                            fi
-
+                        sh '''
                             echo "Running Trivy vulnerability scan on $IMAGE_NAME"
-                            trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME || {
-                                echo "Trivy scan found vulnerabilities, failing the build"
-                                exit 1
-                            }
-                        """
+                            trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME || exit 1
+                        '''
                     }
                 }
             }
@@ -120,12 +110,12 @@ def call(Map config = [:]) {
             stage('Push Docker Image') {
                 steps {
                     script {
-                        sh """
+                        sh '''
                             echo "Logging into Docker Hub"
                             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
                             echo "Pushing Docker image: $IMAGE_NAME"
                             docker push $IMAGE_NAME
-                        """
+                        '''
                     }
                 }
             }
@@ -136,18 +126,16 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             def deploymentFile = config.language == 'go' ? 'kubernetes/backend-deployment.yaml' : 'kubernetes/frontend-deployment.yaml'
                             echo "Updating Kubernetes deployment.yaml with new image"
-                            sh """
-                                yq eval '.spec.template.spec.containers[0].image = \"$IMAGE_NAME\"' -i $deploymentFile
-                                
+                            sh '''
+                                yq eval '.spec.template.spec.containers[0].image = "$IMAGE_NAME"' -i $deploymentFile
                                 git add $deploymentFile
                                 git commit -m "Updated deployment.yaml with $IMAGE_NAME"
                                 git push || echo "Warning: Git push failed. Please check permissions"
-                            """
+                            '''
                         }
                     }
                 }
             }
-
         }
 
         post {
