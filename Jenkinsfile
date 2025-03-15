@@ -5,14 +5,29 @@ pipeline {
     stages {
         stage('Build and Deploy Backend') {
             steps {
-                ciPipeline(language: 'go')
+                script {
+                    echo "Starting Backend Pipeline for Go"
+                    ciPipeline(language: 'go')
+                }
             }
         }
 
         stage('Deploy Frontend') {
             steps {
-                ciPipeline(language: 'html')
+                script {
+                    echo "Starting Frontend Pipeline for HTML"
+                    ciPipeline(language: 'html')
+                }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed! Please check the logs."
         }
     }
 }

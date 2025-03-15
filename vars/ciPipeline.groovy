@@ -7,9 +7,11 @@ def call(Map config = [:]) {
             DOCKER_USERNAME = credentials('docker-username')
             DOCKER_PASSWORD = credentials('docker-password')
             SLACK_WEBHOOK = credentials('slack-webhook')
-            IMAGE_NAME = "${env.DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
-            GIT_REPO = 'https://github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git'
+            GITHUB_TOKEN = credentials('github-pat')
+            IMAGE_NAME = "${DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
+            GIT_REPO = "https://${GITHUB_TOKEN}@github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git"
             GIT_BRANCH = 'main'
+            SONAR_PROJECT_KEY = "my-${config.language}-project"
         }
 
         stages {
@@ -21,7 +23,7 @@ def call(Map config = [:]) {
                             rm -rf workspace
                             git clone -b $GIT_BRANCH $GIT_REPO workspace
                             cd workspace
-                            git config --global --add safe.directory \$(pwd)
+                            git config --global --add safe.directory $(pwd)
                         '''
                     }
                 }
@@ -48,7 +50,7 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             def sonarFile = config.language == 'go' ? 'resources/sonar-project-go.properties' : 'resources/sonar-project-html.properties'
                             echo "Running SonarQube Analysis"
-                            sh "sonar-scanner -Dproject.settings=${sonarFile}"
+                            sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dproject.settings=${sonarFile} -Dsonar.login=${SONAR_TOKEN}"
                         }
                     }
                 }
@@ -57,10 +59,11 @@ def call(Map config = [:]) {
             stage('Sonar Quality Gate') {
                 steps {
                     script {
-                        def status = sh(script: '''
-                            curl -s -X GET "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=my-project" \
-                            -H "Authorization: Bearer $SONAR_TOKEN" | jq -r '.projectStatus.status'
-                        ''', returnStdout: true).trim()
+                        def status = sh(
+                            script: """
+                            curl -s -u $SONAR_TOKEN: "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$SONAR_PROJECT_KEY" | jq -r '.projectStatus.status'
+                            """, returnStdout: true
+                        ).trim()
 
                         if (status != "OK") {
                             error "SonarQube Quality Gate Failed"
@@ -99,9 +102,12 @@ def call(Map config = [:]) {
             stage('Trivy Scan Docker Image') {
                 steps {
                     script {
+                        echo "Running Trivy vulnerability scan on $IMAGE_NAME"
                         sh '''
-                            echo "Running Trivy vulnerability scan on $IMAGE_NAME"
-                            trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME || exit 1
+                            trivy image --exit-code 1 --severity CRITICAL,HIGH $IMAGE_NAME || {
+                                echo "Critical vulnerabilities found!";
+                                exit 1;
+                            }
                         '''
                     }
                 }
@@ -110,10 +116,9 @@ def call(Map config = [:]) {
             stage('Push Docker Image') {
                 steps {
                     script {
+                        echo "Logging into Docker Hub and pushing the image"
                         sh '''
-                            echo "Logging into Docker Hub"
                             echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-                            echo "Pushing Docker image: $IMAGE_NAME"
                             docker push $IMAGE_NAME
                         '''
                     }
@@ -129,8 +134,8 @@ def call(Map config = [:]) {
                             sh '''
                                 yq eval '.spec.template.spec.containers[0].image = "$IMAGE_NAME"' -i $deploymentFile
                                 git add $deploymentFile
-                                git commit -m "Updated deployment.yaml with $IMAGE_NAME"
-                                git push || echo "Warning: Git push failed. Please check permissions"
+                                git commit -m "Update deployment.yaml with image $IMAGE_NAME" || echo "No changes to commit"
+                                git push origin $GIT_BRANCH || echo "Git push failed. Please check permissions."
                             '''
                         }
                     }
@@ -141,7 +146,7 @@ def call(Map config = [:]) {
         post {
             success {
                 script {
-                    echo "Pipeline execution successful, sending Slack notification"
+                    echo "Pipeline successful, sending Slack notification"
                     slackSend(color: 'good', message: "${config.language} pipeline executed successfully: ${env.BUILD_URL}")
                 }
             }
