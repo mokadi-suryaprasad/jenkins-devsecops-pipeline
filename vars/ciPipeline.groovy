@@ -8,7 +8,7 @@ def call(Map config = [:]) {
             DOCKER_PASSWORD = credentials('docker-password')
             SLACK_WEBHOOK = credentials('slack-webhook')
             IMAGE_NAME = "${env.DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
-            GIT_REPO = 'https://github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git' 
+            GIT_REPO = 'https://github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git'
             GIT_BRANCH = 'main'
         }
 
