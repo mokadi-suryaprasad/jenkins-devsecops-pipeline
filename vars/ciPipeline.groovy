@@ -7,9 +7,10 @@ def call(Map config = [:]) {
             DOCKER_USERNAME = credentials('docker-username')
             DOCKER_PASSWORD = credentials('docker-password')
             SLACK_WEBHOOK = credentials('slack-webhook')
-            GITHUB_TOKEN = credentials('github-pat')
+            GITHUB_TOKEN = credentials('github-pat')  // GitHub Personal Access Token (PAT)
+            GITHUB_USERNAME = 'mokadi-suryaprasad'  // Replace with your GitHub username
+            REPO_NAME = "mokadi-suryaprasad/jenkins-devsecops-pipeline"
             IMAGE_NAME = "${DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
-            GIT_REPO = "https://${GITHUB_TOKEN}@github.com/mokadi-suryaprasad/jenkins-devsecops-pipeline.git"
             GIT_BRANCH = 'main'
             SONAR_PROJECT_KEY = "my-${config.language}-project"
         }
@@ -18,12 +19,16 @@ def call(Map config = [:]) {
             stage('Clone GitHub Repository') {
                 steps {
                     script {
-                        echo "Cloning repository from GitHub"
+                        echo "Cloning repository from GitHub using HTTPS authentication"
                         sh '''
                             rm -rf workspace
-                            git clone -b $GIT_BRANCH $GIT_REPO workspace
+                            git clone -b $GIT_BRANCH https://github.com/$REPO_NAME.git workspace
                             cd workspace
-                            git config --global --add safe.directory $(pwd)
+                            git config --global user.email "mspr9773@gmail.com"
+                            git config --global user.name "MSR"
+                            git config --global credential.helper store
+                            echo "https://$GITHUB_USERNAME:$GITHUB_TOKEN@github.com" > ~/.git-credentials
+                            chmod 600 ~/.git-credentials
                         '''
                     }
                 }
@@ -135,7 +140,9 @@ def call(Map config = [:]) {
                                 yq eval '.spec.template.spec.containers[0].image = "$IMAGE_NAME"' -i $deploymentFile
                                 git add $deploymentFile
                                 git commit -m "Update deployment.yaml with image $IMAGE_NAME" || echo "No changes to commit"
-                                git push origin $GIT_BRANCH || echo "Git push failed. Please check permissions."
+                                git config --global user.email "jenkins@example.com"
+                                git config --global user.name "Jenkins CI"
+                                git push https://$GITHUB_USERNAME:$GITHUB_TOKEN@github.com/$REPO_NAME.git $GIT_BRANCH || echo "Git push failed. Please check permissions."
                             '''
                         }
                     }
