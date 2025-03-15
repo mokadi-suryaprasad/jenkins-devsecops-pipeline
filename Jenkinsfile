@@ -16,7 +16,7 @@ pipeline {
                         rm -rf workspace
                         git clone -b $GIT_BRANCH $GIT_REPO workspace
                         cd workspace
-                        git config --global --add safe.directory $(pwd)
+                        git config --global --add safe.directory ${sh(script: 'pwd', returnStdout: true).trim()}
                     """
                 }
             }
