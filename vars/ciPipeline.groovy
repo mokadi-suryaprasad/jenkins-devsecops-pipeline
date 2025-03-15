@@ -7,8 +7,7 @@ def call(Map config = [:]) {
             DOCKER_USERNAME = credentials('docker-username')
             DOCKER_PASSWORD = credentials('docker-password')
             SLACK_WEBHOOK = credentials('slack-webhook')
-            GITHUB_TOKEN = credentials('github-pat')  // GitHub Personal Access Token (PAT)
-            GITHUB_USERNAME = 'mokadi-suryaprasad'  // Replace with your GitHub username
+            GITHUB_TOKEN = credentials('github-pat')  // GitHub Personal Access Token
             REPO_NAME = "mokadi-suryaprasad/jenkins-devsecops-pipeline"
             IMAGE_NAME = "${DOCKER_USERNAME}/${config.language}-app:${env.BUILD_NUMBER}"
             GIT_BRANCH = 'main'
@@ -19,17 +18,16 @@ def call(Map config = [:]) {
             stage('Clone GitHub Repository') {
                 steps {
                     script {
-                        echo "Cloning repository from GitHub using HTTPS authentication"
-                        sh '''
-                            rm -rf workspace
-                            git clone -b $GIT_BRANCH https://github.com/$REPO_NAME.git workspace
-                            cd workspace
-                            git config --global user.email "mspr9773@gmail.com"
-                            git config --global user.name "MSR"
-                            git config --global credential.helper store
-                            echo "https://$GITHUB_USERNAME:$GITHUB_TOKEN@github.com" > ~/.git-credentials
-                            chmod 600 ~/.git-credentials
-                        '''
+                        withCredentials([string(credentialsId: 'github-pat', variable: 'GITHUB_TOKEN')]) {
+                            echo "Cloning repository from GitHub"
+                            sh '''
+                                rm -rf workspace
+                                git clone -b $GIT_BRANCH https://x-access-token:$GITHUB_TOKEN@github.com/$REPO_NAME.git workspace
+                                cd workspace
+                                git config --global user.email "msuryaprasad11@gmail.com"
+                                git config --global user.name "MSR"
+                            '''
+                        }
                     }
                 }
             }
@@ -40,7 +38,7 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             if (config.language == 'go') {
                                 echo "Running Go tests"
-                                sh 'go test ./...'
+                                sh 'go test ./... || exit 1'
                             } else {
                                 echo "Skipping tests for HTML as it is static"
                             }
@@ -55,7 +53,11 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             def sonarFile = config.language == 'go' ? 'resources/sonar-project-go.properties' : 'resources/sonar-project-html.properties'
                             echo "Running SonarQube Analysis"
-                            sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dproject.settings=${sonarFile} -Dsonar.login=${SONAR_TOKEN}"
+                            sh '''
+                                sonar-scanner -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+                                              -Dproject.settings=$sonarFile \
+                                              -Dsonar.login=$SONAR_TOKEN || exit 1
+                            '''
                         }
                     }
                 }
@@ -71,7 +73,7 @@ def call(Map config = [:]) {
                         ).trim()
 
                         if (status != "OK") {
-                            error "SonarQube Quality Gate Failed"
+                            error "SonarQube Quality Gate Failed!"
                         }
                     }
                 }
@@ -83,7 +85,7 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             if (config.language == 'go') {
                                 echo "Building Go application"
-                                sh 'go build -o app'
+                                sh 'go build -o app || exit 1'
                             } else {
                                 echo "Skipping build step for HTML"
                             }
@@ -98,7 +100,7 @@ def call(Map config = [:]) {
                         dir('workspace') {
                             def dockerfilePath = config.language == 'go' ? 'backend/Dockerfile' : 'frontend/Dockerfile'
                             echo "Building Docker image: $IMAGE_NAME"
-                            sh "docker build -t $IMAGE_NAME -f $dockerfilePath ."
+                            sh "docker build -t $IMAGE_NAME -f $dockerfilePath . || exit 1"
                         }
                     }
                 }
@@ -122,10 +124,12 @@ def call(Map config = [:]) {
                 steps {
                     script {
                         echo "Logging into Docker Hub and pushing the image"
-                        sh '''
-                            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-                            docker push $IMAGE_NAME
-                        '''
+                        withCredentials([usernamePassword(credentialsId: 'docker-credentials', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                            sh '''
+                                echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                                docker push $IMAGE_NAME || exit 1
+                            '''
+                        }
                     }
                 }
             }
@@ -133,17 +137,17 @@ def call(Map config = [:]) {
             stage('Update Kubernetes Deployment') {
                 steps {
                     script {
-                        dir('workspace') {
-                            def deploymentFile = config.language == 'go' ? 'kubernetes/backend-deployment.yaml' : 'kubernetes/frontend-deployment.yaml'
-                            echo "Updating Kubernetes deployment.yaml with new image"
-                            sh '''
-                                yq eval '.spec.template.spec.containers[0].image = "$IMAGE_NAME"' -i $deploymentFile
-                                git add $deploymentFile
-                                git commit -m "Update deployment.yaml with image $IMAGE_NAME" || echo "No changes to commit"
-                                git config --global user.email "jenkins@example.com"
-                                git config --global user.name "Jenkins CI"
-                                git push https://$GITHUB_USERNAME:$GITHUB_TOKEN@github.com/$REPO_NAME.git $GIT_BRANCH || echo "Git push failed. Please check permissions."
-                            '''
+                        withCredentials([string(credentialsId: 'github-pat', variable: 'GITHUB_TOKEN')]) {
+                            dir('workspace') {
+                                def deploymentFile = config.language == 'go' ? 'kubernetes/backend-deployment.yaml' : 'kubernetes/frontend-deployment.yaml'
+                                echo "Updating Kubernetes deployment.yaml with new image"
+                                sh '''
+                                    yq eval '.spec.template.spec.containers[0].image = "$IMAGE_NAME"' -i $deploymentFile
+                                    git add $deploymentFile
+                                    git commit -m "Update deployment.yaml with image $IMAGE_NAME" || echo "No changes to commit"
+                                    git push https://x-access-token:$GITHUB_TOKEN@github.com/$REPO_NAME.git $GIT_BRANCH || echo "Git push failed. Check permissions."
+                                '''
+                            }
                         }
                     }
                 }

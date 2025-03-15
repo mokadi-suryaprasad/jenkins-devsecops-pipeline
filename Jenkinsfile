@@ -3,20 +3,24 @@
 pipeline {
     agent any
     stages {
-        stage('Build and Deploy Backend') {
-            steps {
-                script {
-                    echo "Starting Backend Pipeline for Go"
-                    ciPipeline(language: 'go')
+        stage('Build and Deploy') {
+            parallel {
+                stage('Backend - Go') {
+                    steps {
+                        script {
+                            echo "Starting Backend Pipeline for Go"
+                            ciPipeline(language: 'go')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Deploy Frontend') {
-            steps {
-                script {
-                    echo "Starting Frontend Pipeline for HTML"
-                    ciPipeline(language: 'html')
+                stage('Frontend - HTML') {
+                    steps {
+                        script {
+                            echo "Starting Frontend Pipeline for HTML"
+                            ciPipeline(language: 'html')
+                        }
+                    }
                 }
             }
         }
