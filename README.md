@@ -20,8 +20,6 @@ The pipeline follows a step-by-step process:
 ## Pipeline Diagram
 Below is a visual representation of the DevSecOps pipeline:
 
-![DevSecOps Pipeline](./A_detailed_DevSecOps_CI/CD_pipeline_diagram_showca.png)
-
 ## Technologies Used
 - **Jenkins** - Automates CI/CD pipeline execution
 - **GitHub/GitLab** - Version control system
